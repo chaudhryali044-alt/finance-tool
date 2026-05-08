@@ -7,23 +7,51 @@ export interface InvestorResult {
   whyTheyFit: string;
   outreachAngle: string;
   fundActivity: "Recently Active" | "Active" | "Quiet" | "Unknown";
+  recentSignal?: string | null;
+  fundStatus?: "Raising" | "Deploying" | "Harvesting" | "Unknown";
   sourceLinks?: string[];
 }
 
+export interface SearchSource {
+  title: string;
+  url: string;
+  category: string;
+  snippet?: string;
+}
+
+export interface RawSignal {
+  headline: string;
+  url: string;
+  category: string;
+  snippet?: string;
+}
+
+export interface AnalysisMeta {
+  modelUsed: string;
+  generatedAt: string;
+  sourceCount: number;
+  searchCount: number;
+  dataConfidence: "High" | "Medium" | "Low";
+  sources: SearchSource[];
+  rawSignals: RawSignal[];
+}
+
 export interface RaiseResult {
-  companySummary: string;
   companyName: string;
   sector: string;
   stage: string;
   amount: string;
   geography: string;
+  companySummary: string;
   investors: InvestorResult[];
+  meta?: AnalysisMeta;
 }
 
 export interface DealSignal {
   text: string;
   found: boolean;
   source?: string;
+  category?: string;
 }
 
 export interface LikelyAcquirer {
@@ -36,13 +64,13 @@ export interface LikelyAcquirer {
 }
 
 export interface Financials {
-  revenue?: string;
-  ebitdaMargin?: string;
-  revenueGrowth?: string;
-  keyMetrics?: string;
-  evRange?: string;
-  source?: string;
-  sourceUrl?: string;
+  revenue?: string | null;
+  ebitdaMargin?: string | null;
+  revenueGrowth?: string | null;
+  keyMetrics?: string | null;
+  evRange?: string | null;
+  source?: string | null;
+  sourceUrl?: string | null;
   filingDate?: string;
 }
 
@@ -54,9 +82,10 @@ export interface DealResult {
   dataConfidence: "High" | "Medium" | "Low";
   lastUpdated: string;
   signals: DealSignal[];
-  financials?: Financials;
+  financials?: Financials | null;
   likelyAcquirers: LikelyAcquirer[];
   mandateBrief: string;
+  meta?: AnalysisMeta;
 }
 
 export interface WatchlistItem {
