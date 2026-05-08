@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { RaiseResult, InvestorResult, SearchSource, RawSignal } from "@/types";
 import { getSessionId } from "@/lib/session";
 import { downloadRaisePDF } from "@/lib/pdf";
+import IntelligenceSources from "@/components/IntelligenceSources";
 
 const ACTIVITY_CONFIG = {
   "Recently Active": { icon: "🟢", color: "text-success" },
@@ -371,6 +372,13 @@ export default function RaiseResults({
         )}
       </div>
 
+      {/* Degraded warning */}
+      {result.degradedNote && (
+        <div className="bg-gold/5 border border-gold/20 rounded-lg px-5 py-3 text-sm text-gold">
+          ⚠ {result.degradedNote}
+        </div>
+      )}
+
       {/* Investor count */}
       <div className="flex items-center justify-between">
         <div>
@@ -428,7 +436,12 @@ export default function RaiseResults({
         )}
       </div>
 
-      {/* Sources + Raw Signals (FIX 4) */}
+      {/* Intelligence Sources panel */}
+      {result.meta && result.meta.contributions && result.meta.contributions.length > 0 && (
+        <IntelligenceSources meta={result.meta} />
+      )}
+
+      {/* Sources + Raw Signals */}
       {result.meta && result.meta.sources.length > 0 && (
         <SourcesSection
           sources={result.meta.sources}

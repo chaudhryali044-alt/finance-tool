@@ -1,5 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { groqWithFallback } from "@/lib/groq";
+import {
+  truncateSignals,
+  formatSignalsForPrompt,
+  buildStrategicChain,
+  buildFinancialChain,
+  buildMarketChain,
+  runModelChain,
+  runSynthesis,
+  determineAnalysisQuality,
+  safeParseJSON,
+} from "@/lib/triangulate";
 
 const SERPER_API_KEY = process.env.SERPER_API_KEY!;
 
@@ -32,22 +42,21 @@ async function serperSearch(query: string, category: string): Promise<SearchResu
 async function fetchSecEdgar(company: string): Promise<{ text: string; url: string }> {
   try {
     const url = `https://efts.sec.gov/LATEST/search-index?q=${encodeURIComponent(`"${company}"`)}&forms=10-K,10-Q&dateRange=custom&startdt=2024-01-01`;
-    const res = await fetch(url, {
-      headers: { "User-Agent": "Meridian research@meridian.app" },
-    });
+    const res = await fetch(url, { headers: { "User-Agent": "Meridian research@meridian.app" } });
     if (!res.ok) return { text: "", url: "" };
     const data = await res.json();
     const hits = data.hits?.hits ?? [];
     if (hits.length === 0) return { text: "", url: "" };
-
     const lines = hits.slice(0, 5).map(
       (h: { _source?: { period_of_report?: string; form_type?: string; entity_name?: string; file_date?: string } }) => {
         const src = h._source ?? {};
         return `SEC ${src.form_type ?? "filing"}: ${src.entity_name ?? company} — Period: ${src.period_of_report ?? "N/A"} — Filed: ${src.file_date ?? "N/A"}`;
       }
     );
-    const edgarUrl = `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company=${encodeURIComponent(company)}&type=10-K&dateb=&owner=include&count=10`;
-    return { text: lines.join("\n"), url: edgarUrl };
+    return {
+      text: lines.join("\n"),
+      url: `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company=${encodeURIComponent(company)}&type=10-K`,
+    };
   } catch {
     return { text: "", url: "" };
   }
@@ -64,47 +73,30 @@ async function fetchCompaniesHouse(company: string): Promise<{ text: string; url
     const items = searchData.items ?? [];
     if (items.length === 0) return { text: "", url: "", filingHistoryText: "" };
 
-    const topCompany = items[0] as {
-      title?: string;
-      company_number?: string;
-      date_of_creation?: string;
-      company_status?: string;
-    };
-    const companyNumber = topCompany.company_number ?? "";
-    const chUrl = `https://find-and-update.company-information.service.gov.uk/company/${companyNumber}`;
+    const top = items[0] as { title?: string; company_number?: string; date_of_creation?: string; company_status?: string };
+    const num = top.company_number ?? "";
+    const chUrl = `https://find-and-update.company-information.service.gov.uk/company/${num}`;
+    const summaryText = `Companies House: ${top.title ?? company} — Number: ${num} — Incorporated: ${top.date_of_creation ?? "N/A"} — Status: ${top.company_status ?? "N/A"}`;
 
-    const summaryText = `Companies House: ${topCompany.title ?? company} — Number: ${companyNumber} — Incorporated: ${topCompany.date_of_creation ?? "N/A"} — Status: ${topCompany.company_status ?? "N/A"}`;
-
-    // Fetch filing history for director changes and debt signals
     let filingHistoryText = "";
-    if (companyNumber) {
+    if (num) {
       try {
         const histRes = await fetch(
-          `https://api.company-information.service.gov.uk/company/${companyNumber}/filing-history?items_per_page=20`,
+          `https://api.company-information.service.gov.uk/company/${num}/filing-history?items_per_page=20`,
           { headers: { Authorization: "Basic " + Buffer.from(":").toString("base64") } }
         );
         if (histRes.ok) {
           const histData = await histRes.json();
-          const filings = (histData.items ?? []) as Array<{
-            description?: string;
-            date?: string;
-            type?: string;
-          }>;
-          const interestingTypes = ["CH01", "CH02", "TM01", "AP01", "CS01", "AA", "MR01", "MR04"];
+          const filings = (histData.items ?? []) as Array<{ description?: string; date?: string; type?: string }>;
           const relevant = filings
-            .filter((f) => interestingTypes.some((t) => (f.type ?? "").startsWith(t)))
-            .slice(0, 10);
+            .filter((f) => ["CH01", "CH02", "TM01", "AP01", "CS01", "AA", "MR01", "MR04"].some((t) => (f.type ?? "").startsWith(t)))
+            .slice(0, 8);
           if (relevant.length > 0) {
-            filingHistoryText = relevant
-              .map((f) => `Filing ${f.type}: ${f.description ?? "N/A"} — ${f.date ?? "N/A"}`)
-              .join("\n");
+            filingHistoryText = relevant.map((f) => `Filing ${f.type}: ${f.description ?? "N/A"} — ${f.date ?? "N/A"}`).join("\n");
           }
         }
-      } catch {
-        // filing history optional
-      }
+      } catch { /* optional */ }
     }
-
     return { text: summaryText, url: chUrl, filingHistoryText };
   } catch {
     return { text: "", url: "", filingHistoryText: "" };
@@ -128,7 +120,7 @@ export async function POST(req: NextRequest) {
       && !query.match(/^[A-Z][a-z]+ [A-Z][a-z]+/)
       && query.split(" ").length <= 4;
 
-    // All search batches defined by category (FIX 2 deep scraping)
+    // ── Step 1: Parallel Serper searches + financial data ─────────────────
     const searchBatches: [string, string][] = isSector
       ? [
           [`${query} M&A activity deals 2026`, "Deal Signals"],
@@ -141,35 +133,29 @@ export async function POST(req: NextRequest) {
           [`${query} IPO listing plans funding round 2026`, "Financial Signals"],
         ]
       : [
-          // Batch 1 — Deal signals
           [`${query} acquisition OR acquired OR merger 2025 2026`, "Deal Signals"],
           [`${query} buyout OR private equity OR PE firm 2026`, "Deal Signals"],
           [`${query} strategic review OR sale process 2026`, "Deal Signals"],
           [`${query} investment banker OR advisor hired 2026`, "Deal Signals"],
           [`${query} takeover bid OR offer OR approach 2026`, "Deal Signals"],
-          // Batch 2 — Leadership signals
           [`${query} CEO departure OR resignation OR steps down`, "Leadership Signals"],
           [`${query} founder exit OR transition OR succession`, "Leadership Signals"],
           [`${query} CFO leaves OR new CFO appointed 2026`, "Leadership Signals"],
           [`${query} board changes OR new chairman 2026`, "Leadership Signals"],
           [`${query} management buyout OR MBO 2026`, "Leadership Signals"],
-          // Batch 3 — Financial signals
           [`${query} revenue growth OR decline results 2026`, "Financial Signals"],
           [`${query} funding round OR raises capital 2026`, "Financial Signals"],
           [`${query} IPO OR listing plans OR postponed 2026`, "Financial Signals"],
           [`${query} debt refinancing OR restructuring 2026`, "Financial Signals"],
           [`${query} cost cutting OR layoffs OR restructure 2026`, "Financial Signals"],
-          // Batch 4 — Strategic signals
           [`${query} strategic partnership OR joint venture 2026`, "Strategic Signals"],
           [`${query} market share OR competition OR disruption`, "Strategic Signals"],
           [`${query} expansion OR enters market 2026`, "Strategic Signals"],
           [`${query} divestiture OR sells division OR carve out`, "Strategic Signals"],
-          // Batch 5 — Social signals
           [`${query} site:twitter.com acquisition OR merger`, "Social Signals"],
           [`${query} site:linkedin.com strategic OR investment`, "Social Signals"],
         ];
 
-    // Run all Serper searches + financial data fetches in parallel (FIX 5)
     const [searchSettled, secResult, chResult] = await Promise.all([
       Promise.allSettled(searchBatches.map(([q, cat]) => serperSearch(q, cat))),
       isSector ? Promise.resolve({ text: "", url: "" }) : fetchSecEdgar(query),
@@ -179,7 +165,6 @@ export async function POST(req: NextRequest) {
     const allResults: SearchResult[] = searchSettled.flatMap((r) =>
       r.status === "fulfilled" ? r.value : []
     );
-
     const uniqueResults = allResults.filter(
       (r, i, arr) => r.link && arr.findIndex((x) => x.link === r.link) === i
     );
@@ -191,115 +176,114 @@ export async function POST(req: NextRequest) {
     const sourceCount = uniqueResults.length + (useSecData ? 1 : 0) + (useChData ? 1 : 0);
     const dataConfidence = sourceCount >= 5 ? "High" : sourceCount >= 2 ? "Medium" : "Low";
 
-    // Build signals context grouped by category
-    const categorised = new Map<string, SearchResult[]>();
-    for (const r of uniqueResults) {
-      if (!categorised.has(r.category)) categorised.set(r.category, []);
-      categorised.get(r.category)!.push(r);
+    // ── Step 2: Truncate signals before any AI call ───────────────────────
+    const truncated = truncateSignals(uniqueResults);
+    const signalText = formatSignalsForPrompt(truncated);
+
+    const financialDataText = [
+      useSecData ? `SEC EDGAR:\n${secResult.text}` : "",
+      useChData ? `COMPANIES HOUSE:\n${chResult.text}\n${chResult.filingHistoryText}` : "",
+    ].filter(Boolean).join("\n\n");
+
+    // ── Step 3: Build prompts for each task ────────────────────────────────
+
+    // Task A — Strategic Analysis
+    const strategicFull = `You are a senior M&A banker at Lazard with deep expertise in identifying acquisition targets globally.
+
+Write the strategic deal thesis for this company/sector. Explain why this would be an acquisition target, the strategic rationale for potential acquirers, and what market and sector dynamics support a deal. Connect multiple signals together — e.g. CEO departure + PE investor + revenue slowdown suggests strategic review underway. Maximum 400 words.
+
+SUBJECT: ${query}
+DEAL TYPE: ${dealType}
+ANALYSIS TYPE: ${isSector ? "Sector scan" : "Company-specific"}
+
+SIGNALS:
+${signalText}`;
+
+    const strategicCompact = `Write the strategic deal thesis for "${query}" as a potential ${dealType}. Connect signals together and explain market dynamics. Maximum 300 words. Be concise and direct.
+
+SIGNALS: ${signalText.slice(0, 400)}`;
+
+    // Task B — Financial Analysis
+    const financialFull = `You are a financial analyst specialising in M&A valuation. Based on the signals and any financial data provided, write a financial analysis.
+
+If financial data from SEC EDGAR or Companies House is available, calculate an indicative EV range using appropriate sector multiples. State your methodology. If no financial data is available, explicitly state this and explain why — never fabricate numbers. Maximum 400 words.
+
+SUBJECT: ${query}
+${financialDataText ? `FINANCIAL DATA:\n${financialDataText}` : "FINANCIAL DATA: Not available (private or non-UK/US company)"}
+
+SIGNALS:
+${signalText}`;
+
+    const financialCompact = `Write a financial analysis for "${query}" M&A opportunity. ${financialDataText ? "Use the financial data provided to estimate EV range with sector multiples." : "Note that no financial data is available."} Never fabricate numbers. Maximum 300 words. Be concise and direct.
+
+${financialDataText ? `FINANCIAL DATA: ${financialDataText.slice(0, 300)}` : ""}`;
+
+    // Task C — Market Intelligence (structured JSON)
+    const marketFull = `You are an M&A market intelligence expert. Based on the signals, identify 3-5 specific potential acquirers and detect 6-10 deal signals. Return ONLY valid JSON, no markdown.
+
+SUBJECT: ${query} | DEAL TYPE: ${dealType}
+
+SIGNALS:
+${signalText}
+
+Return this exact JSON:
+{"signalStrength":"HIGH|MEDIUM|LOW|UNKNOWN","sector":"detected sector","signals":[{"text":"string","found":true,"source":"url or empty","category":"Deal Signals|Leadership Signals|Financial Signals|Strategic Signals|Social Signals"}],"likelyAcquirers":[{"name":"string","type":"Strategic|Financial","rationale":"Two sentences with specific past deals referenced.","dealStructure":"string","precedentTransaction":"string","likelihood":"High|Medium|Low"}]}`;
+
+    const marketCompact = `Identify acquirers and signals for "${query}". Return ONLY valid JSON: {"signalStrength":"HIGH|MEDIUM|LOW|UNKNOWN","sector":"string","signals":[{"text":"string","found":true,"source":"","category":"string"}],"likelyAcquirers":[{"name":"string","type":"Strategic|Financial","rationale":"string","dealStructure":"string","precedentTransaction":"string","likelihood":"High|Medium|Low"}]}. Respond in maximum 300 words total. Be concise and direct.`;
+
+    // Synthesis prompt
+    const synthPrompt = `You are synthesising three separate AI analyses of the same M&A deal opportunity into a professional mandate brief. Combine them into one coherent report structured as:
+
+DEAL SIGNAL ASSESSMENT
+FINANCIAL ANALYSIS
+ACQUIRER UNIVERSE
+KEY SIGNALS ANALYSIS
+RISKS AND CONSIDERATIONS
+RECOMMENDED NEXT STEPS
+
+Where analyses agree, present as consensus. Where they disagree, present both views. Prioritise specific data points over generic statements. Write like a senior Lazard analyst. Output must read as one unified professional note. Maximum 600 words total.`;
+
+    // ── Step 4: Run all three tasks in parallel ────────────────────────────
+    const [taskAResult, taskBResult, taskCResult] = await Promise.all([
+      runModelChain("Strategic", buildStrategicChain(), strategicFull, strategicCompact),
+      runModelChain("Financial", buildFinancialChain(), financialFull, financialCompact),
+      runModelChain("Market", buildMarketChain(), marketFull, marketCompact),
+    ]);
+
+    // ── Step 5: Synthesis ──────────────────────────────────────────────────
+    const synthesis = await runSynthesis(taskAResult, taskBResult, taskCResult, synthPrompt);
+
+    // ── Step 6: Assemble response ──────────────────────────────────────────
+    const taskCParsed = safeParseJSON(taskCResult.content);
+
+    const signals = (taskCParsed?.signals as unknown[]) ?? [];
+    const likelyAcquirers = (taskCParsed?.likelyAcquirers as unknown[]) ?? [];
+    const signalStrength = (taskCParsed?.signalStrength as string) ?? "UNKNOWN";
+    const detectedSector = (taskCParsed?.sector as string) ?? "Unknown";
+
+    // Try to extract financials from Task B narrative
+    let financials = null;
+    if (financialDataText && taskBResult.status === "success") {
+      financials = {
+        keyMetrics: taskBResult.content.slice(0, 600),
+        source: useSecData ? "SEC EDGAR" : useChData ? "Companies House" : null,
+        sourceUrl: useSecData ? secResult.url : useChData ? chResult.url : null,
+      };
     }
 
-    const signalContext = Array.from(categorised.entries())
-      .map(([cat, results]) =>
-        `=== ${cat} ===\n` + results.map((r) => `• ${r.title} — ${r.snippet} [${r.link}]`).join("\n")
-      )
-      .join("\n\n");
+    const analysisQuality = determineAnalysisQuality(taskAResult, taskBResult, taskCResult, synthesis);
 
-    const financialContext = [
-      useSecData ? `SEC EDGAR FILINGS:\n${secResult.text}\nSource: ${secResult.url}` : "",
-      useChData ? `COMPANIES HOUSE:\n${chResult.text}\n${chResult.filingHistoryText ? `Filing History:\n${chResult.filingHistoryText}` : ""}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+    const contributions = [
+      { task: "strategic" as const, displayName: "Strategic Analysis", model: taskAResult.model, status: taskAResult.status },
+      { task: "financial" as const, displayName: "Financial Analysis", model: taskBResult.model, status: taskBResult.status },
+      { task: "market" as const, displayName: "Market Intelligence", model: taskCResult.model, status: taskCResult.status },
+    ];
 
-    const prompt = `You are a senior M&A banker at Lazard with deep expertise in identifying acquisition targets and advising on cross-border transactions globally.
+    const degradedNote =
+      analysisQuality === "Degraded"
+        ? "Some analysis modules unavailable — showing available intelligence only"
+        : null;
 
-You have been given:
-1. Company/sector: "${query}" — Deal type focus: "${dealType}"
-2. Real news signals scraped from the web, grouped by signal category
-3. ${financialContext ? "Financial data from SEC EDGAR or Companies House" : "No financial filing data (private or non-UK/US company)"}
-4. ${isSector ? "ANALYSIS TYPE: Sector scan" : "ANALYSIS TYPE: Company-specific analysis"}
-
-SIGNALS FOUND (${sourceCount} sources across ${searchBatches.length} searches):
-${signalContext || "No signals found — provide analysis based on sector knowledge."}
-
-${financialContext ? `FINANCIAL DATA:\n${financialContext}` : ""}
-
-Your task is to generate a professional deal signal report that a Managing Director would be comfortable presenting to a client.
-
-DEAL SIGNAL ASSESSMENT: Assess overall acquisition signal strength with specific reasoning. Reference actual signals found.
-
-FINANCIAL ANALYSIS: ${financialContext ? "Calculate EV/Revenue and EV/EBITDA multiples using sector benchmarks. State methodology clearly. Provide indicative enterprise value range." : "Explicitly state financial data unavailable for this company. Do not fabricate numbers."}
-
-ACQUIRER UNIVERSE: For each potential acquirer, name specific companies or funds. Explain strategic logic, synergies, market position. Reference comparable acquisitions they have made. Assess deal structure. Give likelihood with reasoning.
-
-KEY SIGNALS ANALYSIS: Analyse each signal category and connect them — e.g. CEO departure + PE investor + revenue slowdown = high probability strategic review underway.
-
-RISKS AND CONSIDERATIONS: Specific regulatory, financial, strategic, timing risks.
-
-RECOMMENDED NEXT STEPS: What a banker should do with this intelligence — specific and actionable.
-
-Write in the voice of a senior analyst at a bulge bracket bank. Professional, specific, direct. No filler sentences.
-
-Return a JSON object with exactly this structure:
-{
-  "companyName": "${query}",
-  "sector": "detected sector",
-  "signalStrength": "HIGH|MEDIUM|LOW|UNKNOWN",
-  "dataConfidence": "${dataConfidence}",
-  "signals": [
-    { "text": "Specific signal description with source detail", "found": true, "source": "url or empty string", "category": "Deal Signals|Leadership Signals|Financial Signals|Strategic Signals|Social Signals" }
-  ],
-  "financials": {
-    "revenue": "only if actual data provided, else null",
-    "ebitdaMargin": "only if actual data provided, else null",
-    "revenueGrowth": "only if actual data provided, else null",
-    "keyMetrics": "only if actual data provided, else null",
-    "evRange": "indicative EV range with methodology, or null if no financial data",
-    "source": "SEC EDGAR|Companies House|null",
-    "sourceUrl": "url or null"
-  },
-  "likelyAcquirers": [
-    {
-      "name": "Specific company or fund name",
-      "type": "Strategic|Financial",
-      "rationale": "Two detailed sentences referencing actual deals they have done.",
-      "dealStructure": "Most likely deal structure and rationale",
-      "precedentTransaction": "Specific named comparable acquisition",
-      "likelihood": "High|Medium|Low"
-    }
-  ],
-  "mandateBrief": "Full professional mandate brief covering: DEAL SIGNAL ASSESSMENT, FINANCIAL ANALYSIS, ACQUIRER UNIVERSE, KEY SIGNALS ANALYSIS, RISKS AND CONSIDERATIONS, RECOMMENDED NEXT STEPS. Write like a senior Lazard analyst. Minimum 500 words."
-}
-
-Return only the JSON object. No markdown fences. Never fabricate financial numbers.`;
-
-    let groqResult: { content: string; modelUsed: string };
-    try {
-      groqResult = await groqWithFallback({
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.2,
-        max_tokens: 6000,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "";
-      if (msg === "RATE_LIMIT_ALL_MODELS") {
-        return NextResponse.json(
-          { error: "Analysis temporarily unavailable — please try again in a few minutes." },
-          { status: 503 }
-        );
-      }
-      throw err;
-    }
-
-    let parsed: Record<string, unknown>;
-    try {
-      const jsonMatch = groqResult.content.match(/\{[\s\S]*\}/);
-      parsed = JSON.parse(jsonMatch ? jsonMatch[0] : groqResult.content);
-    } catch {
-      parsed = {};
-    }
-
-    // Build sources list including financial data sources
     const allSources = [
       ...uniqueResults.map((r) => ({ title: r.title, url: r.link, category: r.category, snippet: r.snippet })),
       ...(useSecData ? [{ title: "SEC EDGAR Filings", url: secResult.url, category: "Financial Data", snippet: secResult.text.slice(0, 150) }] : []),
@@ -308,28 +292,28 @@ Return only the JSON object. No markdown fences. Never fabricate financial numbe
 
     return NextResponse.json({
       companyName: query,
-      sector: parsed.sector ?? "Unknown",
+      sector: detectedSector,
       dealType,
-      signalStrength: parsed.signalStrength ?? "UNKNOWN",
-      dataConfidence: parsed.dataConfidence ?? dataConfidence,
+      signalStrength,
+      dataConfidence,
       lastUpdated: new Date().toISOString(),
-      signals: parsed.signals ?? [],
-      financials: parsed.financials ?? null,
-      likelyAcquirers: parsed.likelyAcquirers ?? [],
-      mandateBrief: parsed.mandateBrief ?? "",
+      signals,
+      financials,
+      likelyAcquirers,
+      mandateBrief: synthesis.content,
+      degradedNote,
       meta: {
-        modelUsed: groqResult.modelUsed,
+        modelUsed: taskCResult.model,
         generatedAt: new Date().toISOString(),
         sourceCount,
         searchCount: searchBatches.length,
         dataConfidence,
         sources: allSources,
-        rawSignals: uniqueResults.map((r) => ({
-          headline: r.title,
-          url: r.link,
-          category: r.category,
-          snippet: r.snippet,
-        })),
+        rawSignals: uniqueResults.map((r) => ({ headline: r.title, url: r.link, category: r.category, snippet: r.snippet })),
+        contributions,
+        synthesisModel: synthesis.model,
+        synthesisFallback: synthesis.fallback,
+        analysisQuality,
       },
     });
   } catch (error) {

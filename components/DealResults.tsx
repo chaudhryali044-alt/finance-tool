@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { DealResult, SearchSource, RawSignal } from "@/types";
 import { getSessionId } from "@/lib/session";
 import { downloadDealPDF } from "@/lib/pdf";
+import IntelligenceSources from "@/components/IntelligenceSources";
 
 const SIGNAL_CONFIG = {
   HIGH: { icon: "🔴", label: "HIGH SIGNAL", color: "text-danger", border: "border-danger/30", bg: "bg-danger/5" },
@@ -261,6 +262,13 @@ export default function DealResults({
       >
         ← New search
       </button>
+
+      {/* Degraded warning */}
+      {result.degradedNote && (
+        <div className="bg-gold/5 border border-gold/20 rounded-lg px-5 py-3 text-sm text-gold">
+          ⚠ {result.degradedNote}
+        </div>
+      )}
 
       {/* Section 1: Deal Signal Header */}
       <div className={`bg-card border ${signalCfg.border} rounded-lg p-8 ${signalCfg.bg}`}>
@@ -524,7 +532,12 @@ export default function DealResults({
         )}
       </div>
 
-      {/* Sources + Raw Signals (FIX 4) */}
+      {/* Intelligence Sources panel */}
+      {result.meta && result.meta.contributions && result.meta.contributions.length > 0 && (
+        <IntelligenceSources meta={result.meta} />
+      )}
+
+      {/* Sources + Raw Signals */}
       {result.meta && result.meta.sources.length > 0 && (
         <SourcesSection
           sources={result.meta.sources}

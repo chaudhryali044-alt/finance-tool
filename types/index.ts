@@ -26,7 +26,17 @@ export interface RawSignal {
   snippet?: string;
 }
 
+export type TaskStatus = "success" | "rate_limited" | "token_limit" | "unavailable";
+
+export interface ModelContribution {
+  task: "strategic" | "financial" | "market";
+  displayName: string;
+  model: string;
+  status: TaskStatus;
+}
+
 export interface AnalysisMeta {
+  // Core
   modelUsed: string;
   generatedAt: string;
   sourceCount: number;
@@ -34,6 +44,11 @@ export interface AnalysisMeta {
   dataConfidence: "High" | "Medium" | "Low";
   sources: SearchSource[];
   rawSignals: RawSignal[];
+  // Triangulation
+  contributions?: ModelContribution[];
+  synthesisModel?: string;
+  synthesisFallback?: boolean;
+  analysisQuality?: "Full" | "Partial" | "Degraded";
 }
 
 export interface RaiseResult {
@@ -44,6 +59,7 @@ export interface RaiseResult {
   geography: string;
   companySummary: string;
   investors: InvestorResult[];
+  degradedNote?: string | null;
   meta?: AnalysisMeta;
 }
 
@@ -85,6 +101,7 @@ export interface DealResult {
   financials?: Financials | null;
   likelyAcquirers: LikelyAcquirer[];
   mandateBrief: string;
+  degradedNote?: string | null;
   meta?: AnalysisMeta;
 }
 
