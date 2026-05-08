@@ -7,6 +7,7 @@ const STEPS_RAISE = [
   { label: "Searching recent investments...", sublabel: "Batch 2 — Portfolio announcements" },
   { label: "Scanning social & mandate signals...", sublabel: "Batch 3–4 — LinkedIn, Twitter, thesis" },
   { label: "Generating investor brief...", sublabel: "Goldman-level analysis via AI" },
+  { label: "Building pitch positioning guide...", sublabel: "Comparable raises + investor positioning" },
 ];
 
 const STEPS_DEALS = [
@@ -16,8 +17,8 @@ const STEPS_DEALS = [
   { label: "Generating mandate brief...", sublabel: "Lazard-level analysis via AI" },
 ];
 
-// Timing: steps advance at 2s, 5.5s, 9s, 12.5s — matches ~8-12s parallel fetch time
-const STEP_TIMINGS = [0, 2000, 5500, 9000];
+// Timing: steps advance at 2s, 5.5s, 9s, 13s — last step is pitch positioning post-pipeline
+const STEP_TIMINGS = [0, 2000, 5500, 9000, 13000];
 
 export default function LoadingState({ tool = "raise" }: { tool?: "raise" | "deals" }) {
   const [currentStep, setCurrentStep] = useState(0);

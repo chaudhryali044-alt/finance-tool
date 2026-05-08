@@ -5,11 +5,13 @@ import {
   buildStrategicChain,
   buildFinancialChain,
   buildMarketChain,
+  buildLightChain,
   runModelChain,
   runSynthesis,
   determineAnalysisQuality,
   safeParseJSON,
 } from "@/lib/triangulate";
+import type { InvestorResult } from "@/types";
 
 const SERPER_API_KEY = process.env.SERPER_API_KEY!;
 
@@ -42,30 +44,61 @@ async function serperSearch(query: string, category: string): Promise<SearchResu
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { companyName, description, sector, stage, amount, currency, geography } = body;
+    const { companyName, description, sector, stage, amount, currency, geography, inputType } = body;
 
     const raiseAmount = `${currency ?? "USD"} ${amount}`;
     const companyDescription = description || companyName;
+    const isDescription = inputType === "description";
 
     // ── Step 1: Parallel Serper searches ──────────────────────────────────
-    const searchBatches: [string, string][] = [
-      [`${companyName} ${sector} company news funding 2025 2026`, "Company News"],
-      [`${companyName} revenue growth traction metrics`, "Company Metrics"],
-      [`${sector} venture capital new fund close 2025 OR 2026`, "Fund Activity"],
-      [`${sector} private equity fund raises capital 2025 OR 2026`, "Fund Activity"],
-      [`${geography} ${sector} investor first close final close 2025 2026`, "Fund Activity"],
-      [`${sector} ${stage} investor AUM billion 2025 2026`, "Fund Activity"],
-      [`${sector} ${stage} investor invests backs leads round 2026`, "Recent Investments"],
-      [`${sector} ${stage} portfolio company announcement investment 2026`, "Recent Investments"],
-      [`${geography} ${sector} series A OR series B OR growth investment 2026`, "Recent Investments"],
-      [`${sector} ${stage} investor site:twitter.com announcement investment`, "Social Signals"],
-      [`${sector} fund manager site:linkedin.com fund raise deploy 2026`, "Social Signals"],
-      [`${sector} venture capital fund size target ${geography} 2025 2026`, "Fund Mandate"],
-      [`${sector} ${stage} investment thesis stage geography focus`, "Fund Mandate"],
-      [`${geography} ${sector} family office sovereign wealth fund investment 2026`, "Fund Mandate"],
-      [`${sector} M&A deal activity valuations 2026`, "Market Context"],
-      [`${geography} startup ecosystem venture activity ${sector} 2026`, "Market Context"],
-    ];
+    let searchBatches: [string, string][];
+
+    if (isDescription) {
+      // Description-based searches (Enhancement 2)
+      searchBatches = [
+        // Batch 1 — Recent fundraises in this space
+        [`${sector} ${geography} ${stage} funding 2026`, "Recent Fundraises"],
+        [`${sector} startup ${geography} raises ${amount} 2026`, "Recent Fundraises"],
+        [`${sector} investment ${geography} series ${stage} 2026`, "Recent Fundraises"],
+        // Batch 2 — Active investors in this space
+        [`top ${sector} investors ${geography} 2026`, "Active Investors"],
+        [`${sector} VC ${geography} active deals 2026`, "Active Investors"],
+        [`${sector} angel investors ${geography} 2026`, "Active Investors"],
+        [`family office ${sector} ${geography} investment 2026`, "Active Investors"],
+        // Batch 3 — Comparable raises
+        [`${sector} ${stage} ${amount} raise ${geography} 2026`, "Comparable Raises"],
+        [`${sector} comparable deals 2025 2026`, "Comparable Raises"],
+        [`${sector} ${stage} funding round announced 2025 2026`, "Comparable Raises"],
+        // Batch 4 — Investor activity signals
+        [`${sector} fund new raise 2025 2026 ${geography}`, "Investor Activity"],
+        [`${sector} investor deploy capital 2026`, "Investor Activity"],
+        [`${sector} site:linkedin.com investment announcement`, "Investor Activity"],
+        [`${sector} site:twitter.com new investment 2026`, "Investor Activity"],
+        // Batch 5 — Market context
+        [`${sector} M&A deal activity valuations 2026`, "Market Context"],
+        [`${geography} startup ecosystem venture activity ${sector} 2026`, "Market Context"],
+      ];
+    } else {
+      // Company-specific searches (existing)
+      searchBatches = [
+        [`${companyName} ${sector} company news funding 2025 2026`, "Company News"],
+        [`${companyName} revenue growth traction metrics`, "Company Metrics"],
+        [`${sector} venture capital new fund close 2025 OR 2026`, "Fund Activity"],
+        [`${sector} private equity fund raises capital 2025 OR 2026`, "Fund Activity"],
+        [`${geography} ${sector} investor first close final close 2025 2026`, "Fund Activity"],
+        [`${sector} ${stage} investor AUM billion 2025 2026`, "Fund Activity"],
+        [`${sector} ${stage} investor invests backs leads round 2026`, "Recent Investments"],
+        [`${sector} ${stage} portfolio company announcement investment 2026`, "Recent Investments"],
+        [`${geography} ${sector} series A OR series B OR growth investment 2026`, "Recent Investments"],
+        [`${sector} ${stage} investor site:twitter.com announcement investment`, "Social Signals"],
+        [`${sector} fund manager site:linkedin.com fund raise deploy 2026`, "Social Signals"],
+        [`${sector} venture capital fund size target ${geography} 2025 2026`, "Fund Mandate"],
+        [`${sector} ${stage} investment thesis stage geography focus`, "Fund Mandate"],
+        [`${geography} ${sector} family office sovereign wealth fund investment 2026`, "Fund Mandate"],
+        [`${sector} M&A deal activity valuations 2026`, "Market Context"],
+        [`${geography} startup ecosystem venture activity ${sector} 2026`, "Market Context"],
+      ];
+    }
 
     const settled = await Promise.allSettled(
       searchBatches.map(([q, cat]) => serperSearch(q, cat))
@@ -86,7 +119,6 @@ export async function POST(req: NextRequest) {
 
     // ── Step 3: Build prompts for each task ────────────────────────────────
 
-    // Task A — Strategic Analysis
     const strategicFull = `You are a Managing Director at Goldman Sachs with 20 years in capital raising across VC, PE, and institutional fundraising globally.
 
 Based on the company profile and market signals, write a strategic investment thesis for this capital raise. Explain why investors should be interested, the market timing opportunity, and the key investment narrative. Reference specific sector dynamics and comparable companies where possible. Maximum 400 words.
@@ -101,7 +133,6 @@ ${signalText}`;
 
 SIGNALS: ${signalText.slice(0, 400)}`;
 
-    // Task B — Financial Analysis
     const financialFull = `You are a senior capital markets analyst. Based on the market signals provided, write a financial context note for this capital raise. Cover: typical valuations for this sector and stage, comparable recent fundraising rounds, current fundraising market conditions. If no specific financial data is in the signals, state this clearly — never fabricate numbers. Maximum 400 words.
 
 SECTOR: ${sector} | STAGE: ${stage} | RAISING: ${raiseAmount} | GEOGRAPHY: ${geography}
@@ -113,7 +144,6 @@ ${signalText}`;
 
 SIGNALS: ${signalText.slice(0, 400)}`;
 
-    // Task C — Market Intelligence (investor list as JSON)
     const marketFull = `You are an expert in global institutional investors. Identify 8-10 specific, real investors most likely to invest in this company. Return ONLY a valid JSON object, no markdown.
 
 COMPANY: ${companyDescription}
@@ -127,7 +157,6 @@ Return this exact JSON structure:
 
     const marketCompact = `Identify 6-8 real investors for a ${stage} ${sector} company raising ${raiseAmount} in ${geography}. Return ONLY valid JSON: {"investors":[{"name":"string","type":"string","chequeSize":"string","sectorFocus":["string"],"geographicFocus":"string","whyTheyFit":"string","outreachAngle":"string","fundActivity":"Recently Active|Active|Quiet|Unknown","fundStatus":"string","recentSignal":"string or null"}]}. Respond in maximum 300 words total. Be concise and direct.`;
 
-    // Synthesis prompt
     const synthPrompt = `You are synthesising three separate AI analyses of the same capital raise opportunity. Combine them into one coherent 2-3 sentence company summary that captures the strategic opportunity, financial context, and investor appeal. Where analyses agree, present as consensus. Where they disagree, present both views. Prioritise specific data points over generic statements. Output must read as one unified analyst note, not three separate pieces. Maximum 600 words total.`;
 
     // ── Step 4: Run all three tasks in parallel ────────────────────────────
@@ -142,12 +171,47 @@ Return this exact JSON structure:
 
     // ── Step 6: Extract structured data from Task C ────────────────────────
     const taskCParsed = safeParseJSON(taskCResult.content);
-    const investors = (taskCParsed?.investors as unknown[]) ?? [];
+    const investors = (taskCParsed?.investors as InvestorResult[]) ?? [];
+
+    // ── Step 7: Pitch Positioning + Comparable Raises (parallel) ──────────
+    const investorTypes = Array.from(new Set(investors.map((inv) => inv.type))).slice(0, 5);
+
+    const pitchPrompt = `You are a capital markets advisor. Generate a specific pitch positioning guide for each investor type listed below. Return ONLY valid JSON, no markdown.
+
+COMPANY: ${companyDescription}
+SECTOR: ${sector} | STAGE: ${stage} | RAISING: ${raiseAmount} | GEOGRAPHY: ${geography}
+INVESTOR TYPES: ${investorTypes.join(", ") || "VC, Angel, Family Office"}
+
+{"pitchPositioning":[{"investorType":"VC","howToFrame":"Two specific sentences on positioning for this investor type.","keyMetrics":["metric 1","metric 2","metric 3"],"whatToAvoid":"One sentence.","idealIntro":"One sentence on best introduction approach."}]}
+
+Generate one object per investor type. Be specific to this company profile, not generic.`;
+
+    const comparablePrompt = `Extract real fundraising events from these market intelligence signals. Look for companies that announced raising money — include company name, amount, stage, sector, investors, and date. Return ONLY valid JSON with maximum 5 entries.
+
+SIGNALS:
+${signalText}
+
+{"comparableRaises":[{"companyName":"string","amount":"string","stage":"string","sector":"string","geography":"string","date":"string","keyInvestors":"string","sourceUrl":"string"}]}
+
+If no specific fundraising events are found in the signals, return {"comparableRaises":[]}. Only include events explicitly mentioned in the signals.`;
+
+    const [pitchSettled, comparableSettled] = await Promise.allSettled([
+      runModelChain("Pitch", buildLightChain(), pitchPrompt, pitchPrompt),
+      runModelChain("Comparables", buildLightChain(), comparablePrompt, comparablePrompt),
+    ]);
+
+    const pitchResult = pitchSettled.status === "fulfilled" ? pitchSettled.value : null;
+    const comparableResult = comparableSettled.status === "fulfilled" ? comparableSettled.value : null;
+
+    const pitchParsed = pitchResult ? safeParseJSON(pitchResult.content) : null;
+    const pitchPositioning = (pitchParsed?.pitchPositioning as unknown[]) ?? [];
+
+    const comparableParsed = comparableResult ? safeParseJSON(comparableResult.content) : null;
+    const comparableRaises = (comparableParsed?.comparableRaises as unknown[]) ?? [];
 
     // Quality determination
     const analysisQuality = determineAnalysisQuality(taskAResult, taskBResult, taskCResult, synthesis);
 
-    // Build contributions list
     const contributions = [
       { task: "strategic" as const, displayName: "Strategic Analysis", model: taskAResult.model, status: taskAResult.status },
       { task: "financial" as const, displayName: "Financial Analysis", model: taskBResult.model, status: taskBResult.status },
@@ -158,19 +222,26 @@ Return this exact JSON structure:
       ? (taskAResult.content.slice(0, 300) || taskBResult.content.slice(0, 300) || "Analysis complete.")
       : synthesis.content.slice(0, 400);
 
+    // Display name: for description input, derive a short label
+    const displayName = isDescription
+      ? (sector && stage ? `${stage} ${sector} Raise` : (companyName || "").slice(0, 60))
+      : companyName;
+
     const degradedNote =
       analysisQuality === "Degraded"
         ? "Some analysis modules unavailable — showing available intelligence only"
         : null;
 
     return NextResponse.json({
-      companyName,
+      companyName: displayName,
       sector,
       stage,
       amount: raiseAmount,
       geography,
       companySummary,
       investors,
+      comparableRaises,
+      pitchPositioning,
       degradedNote,
       meta: {
         modelUsed: taskCResult.model,

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { RaiseResult, InvestorResult, SearchSource, RawSignal } from "@/types";
+import type { RaiseResult, InvestorResult, SearchSource, RawSignal, ComparableRaise, PitchPositioningItem } from "@/types";
 import { getSessionId } from "@/lib/session";
 import { downloadRaisePDF } from "@/lib/pdf";
 import IntelligenceSources from "@/components/IntelligenceSources";
@@ -121,6 +121,147 @@ function InvestorCard({ investor, index }: { investor: InvestorResult; index: nu
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function ComparableRaisesSection({ comparables }: { comparables: ComparableRaise[] }) {
+  if (comparables.length === 0) {
+    return (
+      <div className="bg-card border border-border rounded-lg p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="h-px w-6 bg-gold/40" />
+          <span className="text-text-secondary text-xs tracking-[0.3em] uppercase font-mono">Comparable Raises</span>
+        </div>
+        <p className="text-sm text-text-secondary/50 italic">
+          No comparable raises found in public data for this profile
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-card border border-border rounded-lg overflow-hidden">
+      <div className="px-6 py-4 border-b border-border">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="h-px w-6 bg-gold/40" />
+            <span className="text-text-secondary text-xs tracking-[0.3em] uppercase font-mono">Comparable Raises</span>
+          </div>
+          <span className="text-[10px] font-mono text-text-secondary/40">{comparables.length} found</span>
+        </div>
+      </div>
+      <div className="divide-y divide-border">
+        {comparables.slice(0, 5).map((c, i) => (
+          <div key={i} className="px-6 py-4">
+            <div className="flex items-start justify-between gap-4 mb-2">
+              <div>
+                <p className="text-sm font-medium text-text-primary">{c.companyName}</p>
+                <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1">
+                  {c.amount && <span className="font-mono text-xs text-gold">{c.amount}</span>}
+                  {c.stage && <span className="text-xs text-text-secondary">{c.stage}</span>}
+                  {c.sector && <span className="text-xs text-text-secondary/60">{c.sector}</span>}
+                  {c.geography && <span className="text-xs text-text-secondary/60">{c.geography}</span>}
+                  {c.date && <span className="text-xs text-text-secondary/40 font-mono">{c.date}</span>}
+                </div>
+              </div>
+              {c.sourceUrl && (
+                <a
+                  href={c.sourceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[10px] text-gold/60 hover:text-gold underline flex-shrink-0"
+                >
+                  Source ↗
+                </a>
+              )}
+            </div>
+            {c.keyInvestors && (
+              <p className="text-[11px] text-text-secondary/60">
+                <span className="text-text-secondary/40 uppercase tracking-wider">Investors: </span>
+                {c.keyInvestors}
+              </p>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PitchPositioningSection({ items, companyName }: { items: PitchPositioningItem[]; companyName: string }) {
+  const [openIndex, setOpenIndex] = useState<number | null>(0);
+
+  if (items.length === 0) return null;
+
+  return (
+    <div className="bg-card border border-border rounded-lg overflow-hidden">
+      <div className="px-6 py-4 border-b border-border">
+        <div className="flex items-center gap-3">
+          <div className="h-px w-6 bg-gold/40" />
+          <span className="text-text-secondary text-xs tracking-[0.3em] uppercase font-mono">Pitch Positioning Guide</span>
+        </div>
+        <p className="text-[11px] text-text-secondary/50 mt-1.5 ml-9">
+          Tailored positioning for {companyName} by investor type
+        </p>
+      </div>
+
+      <div className="divide-y divide-border">
+        {items.map((item, i) => (
+          <div key={i} className="overflow-hidden">
+            <button
+              onClick={() => setOpenIndex(openIndex === i ? null : i)}
+              className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-border/10 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded border border-gold/20 text-gold bg-gold/5">
+                  {item.investorType}
+                </span>
+                <span className="text-sm text-text-primary font-medium">
+                  For {item.investorType} Investors
+                </span>
+              </div>
+              <span className="text-text-secondary text-xs flex-shrink-0">
+                {openIndex === i ? "▲" : "▼"}
+              </span>
+            </button>
+
+            {openIndex === i && (
+              <div className="px-6 pb-5 space-y-4">
+                <div>
+                  <p className="text-[10px] text-text-secondary tracking-widest uppercase mb-1.5">How to Frame</p>
+                  <p className="text-sm text-text-secondary leading-relaxed">{item.howToFrame}</p>
+                </div>
+
+                {item.keyMetrics?.length > 0 && (
+                  <div>
+                    <p className="text-[10px] text-gold tracking-widest uppercase mb-1.5">Key Metrics to Lead With</p>
+                    <ul className="space-y-1">
+                      {item.keyMetrics.map((m, j) => (
+                        <li key={j} className="flex items-start gap-2 text-sm text-text-primary">
+                          <span className="text-gold/60 flex-shrink-0 mt-0.5">·</span>
+                          <span>{m}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <div className="grid sm:grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-[10px] text-danger/70 tracking-widest uppercase mb-1.5">What to Avoid</p>
+                    <p className="text-sm text-text-secondary/80 leading-relaxed">{item.whatToAvoid}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-success/70 tracking-widest uppercase mb-1.5">Ideal Intro Approach</p>
+                    <p className="text-sm text-text-secondary/80 leading-relaxed">{item.idealIntro}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -379,6 +520,11 @@ export default function RaiseResults({
         </div>
       )}
 
+      {/* Comparable Raises */}
+      {result.comparableRaises !== undefined && (
+        <ComparableRaisesSection comparables={result.comparableRaises ?? []} />
+      )}
+
       {/* Investor count */}
       <div className="flex items-center justify-between">
         <div>
@@ -397,6 +543,14 @@ export default function RaiseResults({
           <InvestorCard key={i} investor={investor} index={i} />
         ))}
       </div>
+
+      {/* Pitch Positioning */}
+      {result.pitchPositioning && result.pitchPositioning.length > 0 && (
+        <PitchPositioningSection
+          items={result.pitchPositioning}
+          companyName={result.companyName}
+        />
+      )}
 
       {/* Actions */}
       <div className="border-t border-border pt-8 flex flex-wrap gap-4">

@@ -220,6 +220,13 @@ export async function runModelChain(
 
 // ─── Task chains (exported for use in routes) ─────────────────────────────
 
+export function buildLightChain(): ModelStep[] {
+  return [
+    { name: "Groq Llama 8b", call: (p, t) => callGroq("llama-3.1-8b-instant", p, t), maxTokens: 1200, promptType: "full" },
+    { name: "Groq Mixtral 8x7b", call: (p, t) => callGroq("mixtral-8x7b-32768", p, t), maxTokens: 800, promptType: "full" },
+  ];
+}
+
 export function buildStrategicChain(): ModelStep[] {
   return [
     { name: "Groq Llama 70b", call: (p, t) => callGroq("llama-3.3-70b-versatile", p, t), maxTokens: 4000, promptType: "full" },

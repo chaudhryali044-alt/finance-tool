@@ -51,6 +51,25 @@ export interface AnalysisMeta {
   analysisQuality?: "Full" | "Partial" | "Degraded";
 }
 
+export interface ComparableRaise {
+  companyName: string;
+  amount: string;
+  stage: string;
+  sector: string;
+  geography: string;
+  date: string;
+  keyInvestors: string;
+  sourceUrl: string;
+}
+
+export interface PitchPositioningItem {
+  investorType: string;
+  howToFrame: string;
+  keyMetrics: string[];
+  whatToAvoid: string;
+  idealIntro: string;
+}
+
 export interface RaiseResult {
   companyName: string;
   sector: string;
@@ -59,6 +78,8 @@ export interface RaiseResult {
   geography: string;
   companySummary: string;
   investors: InvestorResult[];
+  comparableRaises?: ComparableRaise[];
+  pitchPositioning?: PitchPositioningItem[];
   degradedNote?: string | null;
   meta?: AnalysisMeta;
 }
