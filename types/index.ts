@@ -10,6 +10,7 @@ export interface InvestorResult {
   recentSignal?: string | null;
   fundStatus?: "Raising" | "Deploying" | "Harvesting" | "Unknown";
   sourceLinks?: string[];
+  identifiedBy?: string;
 }
 
 export interface SearchSource {
@@ -29,7 +30,7 @@ export interface RawSignal {
 export type TaskStatus = "success" | "rate_limited" | "token_limit" | "unavailable";
 
 export interface ModelContribution {
-  task: "strategic" | "financial" | "market";
+  task: "strategic" | "financial" | "market" | "institutional" | "family_office" | "angels" | "strategic_inv";
   displayName: string;
   model: string;
   status: TaskStatus;
@@ -79,6 +80,7 @@ export interface RaiseResult {
   companySummary: string;
   investors: InvestorResult[];
   comparableRaises?: ComparableRaise[];
+  comparableRaisesContext?: string;
   pitchPositioning?: PitchPositioningItem[];
   degradedNote?: string | null;
   meta?: AnalysisMeta;

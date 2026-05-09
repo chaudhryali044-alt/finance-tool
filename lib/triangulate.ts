@@ -66,7 +66,7 @@ function makeHttpError(status: number): Error & { httpStatus: number } {
   return err;
 }
 
-async function callGroq(modelId: string, prompt: string, maxTokens: number): Promise<string> {
+export async function callGroq(modelId: string, prompt: string, maxTokens: number): Promise<string> {
   const client = new Groq({ apiKey: process.env.GROQ_API_KEY! });
   try {
     const res = await client.chat.completions.create({
@@ -83,7 +83,7 @@ async function callGroq(modelId: string, prompt: string, maxTokens: number): Pro
   }
 }
 
-async function callDeepSeek(prompt: string, maxTokens: number): Promise<string> {
+export async function callDeepSeek(prompt: string, maxTokens: number): Promise<string> {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) throw makeHttpError(503);
 
@@ -106,7 +106,7 @@ async function callDeepSeek(prompt: string, maxTokens: number): Promise<string> 
   return data.choices?.[0]?.message?.content ?? "";
 }
 
-async function callGemini(prompt: string, maxTokens: number): Promise<string> {
+export async function callGemini(prompt: string, maxTokens: number): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw makeHttpError(503);
 
@@ -129,7 +129,7 @@ async function callGemini(prompt: string, maxTokens: number): Promise<string> {
   return text;
 }
 
-async function callMistral(prompt: string, maxTokens: number): Promise<string> {
+export async function callMistral(prompt: string, maxTokens: number): Promise<string> {
   const apiKey = process.env.MISTRAL_API_KEY;
   if (!apiKey) throw makeHttpError(503);
 

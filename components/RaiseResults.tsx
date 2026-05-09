@@ -59,9 +59,16 @@ function InvestorCard({ investor, index }: { investor: InvestorResult; index: nu
             </div>
           </div>
         </div>
-        <div className={`text-xs flex items-center gap-1.5 ${activity.color} flex-shrink-0`}>
-          <span>{activity.icon}</span>
-          <span>{investor.fundActivity}</span>
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+          <div className={`text-xs flex items-center gap-1.5 ${activity.color}`}>
+            <span>{activity.icon}</span>
+            <span>{investor.fundActivity}</span>
+          </div>
+          {investor.identifiedBy && (
+            <span className="text-[9px] font-mono text-text-secondary/30">
+              via {investor.identifiedBy}
+            </span>
+          )}
         </div>
       </div>
 
@@ -125,7 +132,7 @@ function InvestorCard({ investor, index }: { investor: InvestorResult; index: nu
   );
 }
 
-function ComparableRaisesSection({ comparables }: { comparables: ComparableRaise[] }) {
+function ComparableRaisesSection({ comparables, marketContext }: { comparables: ComparableRaise[]; marketContext?: string }) {
   if (comparables.length === 0) {
     return (
       <div className="bg-card border border-border rounded-lg p-6">
@@ -133,9 +140,16 @@ function ComparableRaisesSection({ comparables }: { comparables: ComparableRaise
           <div className="h-px w-6 bg-gold/40" />
           <span className="text-text-secondary text-xs tracking-[0.3em] uppercase font-mono">Comparable Raises</span>
         </div>
-        <p className="text-sm text-text-secondary/50 italic">
-          No comparable raises found in public data for this profile
-        </p>
+        {marketContext ? (
+          <div>
+            <p className="text-[10px] text-gold tracking-widest uppercase mb-2">Market Context</p>
+            <p className="text-sm text-text-secondary leading-relaxed">{marketContext}</p>
+          </div>
+        ) : (
+          <p className="text-sm text-text-secondary/50 italic">
+            No comparable raises found in public data for this profile
+          </p>
+        )}
       </div>
     );
   }
@@ -522,7 +536,10 @@ export default function RaiseResults({
 
       {/* Comparable Raises */}
       {result.comparableRaises !== undefined && (
-        <ComparableRaisesSection comparables={result.comparableRaises ?? []} />
+        <ComparableRaisesSection
+          comparables={result.comparableRaises ?? []}
+          marketContext={result.comparableRaisesContext}
+        />
       )}
 
       {/* Investor count */}

@@ -19,7 +19,13 @@ interface DetectResponse {
     stage?: string;
     geography?: string;
     amount?: string;
+    currency?: string;
     description?: string;
+    subSector?: string;
+    useOfFunds?: string;
+    keyStrengths?: string[];
+    displayName?: string;
+    companyType?: string;
   };
 }
 
@@ -129,12 +135,17 @@ export default function RaisePage() {
       setDetected(data);
 
       // Pre-fill form with extracted values, preserving any manually entered values
+      // Prefer explicit currency field from detect over parsing from amount string
+      const detectedCurrency = data.extracted.currency
+        || parseCurrencyFromAmount(data.extracted.amount || "");
       setForm((prev) => ({
         sector: matchSector(data.extracted.sector || "") || prev.sector,
         stage: matchStage(data.extracted.stage || "") || prev.stage,
         geography: data.extracted.geography || prev.geography,
         amount: parseAmountValue(data.extracted.amount || "") || prev.amount,
-        currency: parseCurrencyFromAmount(data.extracted.amount || "") || prev.currency,
+        currency: (detectedCurrency && CURRENCIES.includes(detectedCurrency))
+          ? detectedCurrency
+          : prev.currency,
       }));
 
       setFormPhase("confirming");
