@@ -26,6 +26,7 @@ interface DetectResponse {
     keyStrengths?: string[];
     displayName?: string;
     companyType?: string;
+    companyName?: string | null;
   };
 }
 
@@ -94,7 +95,7 @@ export default function RaisePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          companyName: det?.type === "company" ? mainInput : mainInput,
+          companyName: mainInput,
           description: det?.extracted.description || mainInput,
           sector: form.sector,
           stage: form.stage,
@@ -102,6 +103,7 @@ export default function RaisePage() {
           currency: form.currency,
           geography: form.geography,
           inputType: det?.type ?? "company",
+          detectedCompanyName: det?.extracted.companyName || null,
         }),
       });
       const data = await res.json();

@@ -22,6 +22,7 @@ Reply with JSON only — no markdown, no explanation:
   "type": "company or description",
   "confidence": "high or low",
   "isDescription": true,
+  "companyName": "If a specific real company name is explicitly mentioned (e.g. Monzo, Tesla, Revolut, Acme Ltd), extract it exactly. Return null if the input is a generic description with no specific company name.",
   "companyType": "e.g. SaaS platform, diagnostics company, marketplace",
   "sector": "one of: SaaS, Fintech, Healthcare, Logistics, Consumer, Real Estate, Energy, Other",
   "subSector": "e.g. payments, telemedicine, B2B logistics",
@@ -65,6 +66,7 @@ Classification rules:
         keyStrengths: parsed.keyStrengths ?? [],
         displayName: parsed.displayName,
         companyType: parsed.companyType,
+        companyName: parsed.companyName ?? null,
       },
     });
   } catch (err) {

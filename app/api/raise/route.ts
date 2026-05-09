@@ -188,15 +188,17 @@ async function serperSearch(query: string, category: string): Promise<SearchResu
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { companyName, description, sector, stage, amount, currency, geography, inputType } = body;
+    const { companyName, description, sector, stage, amount, currency, geography, inputType, detectedCompanyName } = body;
 
     const raiseAmount = `${currency ?? "USD"} ${amount}`;
     const companyDescription = description || companyName;
     const isDescription = inputType === "description";
 
-    // FIX 1 — clean display name, never template placeholders
+    // Use real extracted company name if available, otherwise build Undisclosed label
     const geoShort = geography ? geography.split(",")[0].trim() : "";
-    const displayName = isDescription
+    const displayName = detectedCompanyName
+      ? detectedCompanyName
+      : isDescription
       ? `Undisclosed${geoShort ? ` ${geoShort}` : ""}${sector ? ` ${sector}` : ""} Company`
       : companyName;
 
@@ -285,14 +287,16 @@ ${signalText}`;
 
 SIGNALS: ${signalText.slice(0, 400)}`;
 
-    const financialFull = `You are a senior capital markets analyst. Write a financial context note for this capital raise. Cover: typical valuations, comparable recent fundraising rounds, current market conditions. Never fabricate numbers — if not in signals, state that clearly. Maximum 400 words.
+    const financialFull = `You are a senior capital markets analyst. Write a financial context note for this capital raise. Cover: typical valuations, comparable recent fundraising rounds, current market conditions.
+
+IMPORTANT ANTI-HALLUCINATION RULE: Do not fabricate specific revenue figures, ARR, MRR, or growth percentages. If financial data is not present in the signals below, describe the market-level valuation context for this stage and sector only. Maximum 400 words.
 
 SECTOR: ${sector} | STAGE: ${stage} | RAISING: ${raiseAmount} | GEOGRAPHY: ${geography}
 
 MARKET SIGNALS:
 ${signalText}`;
 
-    const financialCompact = `Write a financial context note for a ${stage} ${sector} raise of ${raiseAmount} in ${geography}. Cover valuations and market conditions. 300 words max.
+    const financialCompact = `Write a financial context note for a ${stage} ${sector} raise of ${raiseAmount} in ${geography}. Cover valuations and market conditions. Do not fabricate company-specific financial figures. 300 words max.
 
 SIGNALS: ${signalText.slice(0, 400)}`;
 
@@ -305,7 +309,7 @@ SECTOR: ${sector} | STAGE: ${stage} | RAISING: ${raiseAmount} | GEOGRAPHY: ${geo
 MARKET INTELLIGENCE:
 ${signalText.slice(0, 600)}`;
 
-    const investorArraySchema = `[{"name":"string","type":"VC|PE|Angel|Family Office|SWF|Corporate","chequeSize":"e.g. $500k–$2m","sectorFocus":["string"],"geographicFocus":"string","whyTheyFit":"Two sentences referencing actual known portfolio and deal fit.","outreachAngle":"One specific non-generic outreach sentence.","fundActivity":"Recently Active|Active|Quiet|Unknown","fundStatus":"Raising|Deploying|Harvesting|Unknown","recentSignal":"string or null"}]`;
+    const investorArraySchema = `[{"name":"string","type":"VC|PE|Angel|Family Office|SWF|Corporate","chequeSize":"e.g. $500k–$2m","sectorFocus":["string"],"geographicFocus":"string","whyTheyFit":"Two sentences referencing their actual known portfolio companies and why this deal fits their thesis.","outreachAngle":"One specific outreach sentence referencing their portfolio e.g. '[Investor] backed [Company] in [Year] at a similar stage — this deal fits their pattern of [thesis].' Never use 'great fit' or 'strong partner' clichés.","fundActivity":"Recently Active|Active|Quiet|Unknown","fundStatus":"Raising|Deploying|Harvesting|Unknown","recentSignal":"One sentence citing a real recent fund close, investment, or public statement. Return null if unknown — never fabricate."}]`;
 
     const institutionalFull = `You are a senior Goldman Sachs banker. Identify top-tier institutional investors (VCs and PE firms) for this deal.
 ${investorBase}
@@ -363,7 +367,7 @@ ${investorArraySchema}`;
       ),
       runInvestorTask(
         familyOfficeFull, familyOfficeCompact, "DeepSeek",
-        (p, t) => callDeepSeek(p, t)
+        (p, t) => callDeepSeek("You are a private wealth specialist with deep knowledge of family office and UHNWI investment mandates globally.", p, t)
       ),
       runInvestorTask(
         angelsFull, angelsCompact, "Gemini Flash",

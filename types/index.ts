@@ -100,6 +100,7 @@ export interface LikelyAcquirer {
   dealStructure: string;
   precedentTransaction: string;
   likelihood: "High" | "Medium" | "Low";
+  identifiedBy?: string;
 }
 
 export interface Financials {

@@ -26,11 +26,23 @@ const LIKELIHOOD_COLOR: Record<string, string> = {
 };
 
 const SIGNAL_CATEGORY_COLORS: Record<string, string> = {
+  // Legacy categories
   "Deal Signals": "text-danger",
   "Leadership Signals": "text-gold",
   "Financial Signals": "text-blue-400",
   "Strategic Signals": "text-purple-400",
   "Social Signals": "text-cyan-400",
+  // New classification categories
+  "DEAL": "text-danger",
+  "LEADERSHIP": "text-gold",
+  "FINANCIAL": "text-blue-400",
+  "STRATEGIC": "text-purple-400",
+  "DISTRESS": "text-orange-400",
+  "UK Regulatory": "text-cyan-400",
+  "US Regulatory": "text-cyan-400",
+  "US Financial Data": "text-blue-300",
+  "UK Financial Data": "text-blue-300",
+  "Financial Results": "text-blue-400",
 };
 
 function SourcesSection({ sources, rawSignals, meta }: {
@@ -430,7 +442,14 @@ export default function DealResults({
                     <span className="font-mono text-gold/40 text-xs">{String(i + 1).padStart(2, "0")}</span>
                     <div>
                       <h4 className="font-playfair text-lg text-text-primary">{acq.name}</h4>
-                      <span className="text-xs text-text-secondary">{acq.type}</span>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-text-secondary">{acq.type}</span>
+                        {acq.identifiedBy && (
+                          <span className="text-[10px] font-mono text-text-secondary/40 bg-border/30 px-1.5 py-0.5 rounded">
+                            via {acq.identifiedBy}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <span className={`text-xs font-mono font-bold ${LIKELIHOOD_COLOR[acq.likelihood] ?? "text-text-secondary"}`}>

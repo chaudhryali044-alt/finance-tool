@@ -83,11 +83,11 @@ export async function callGroq(modelId: string, prompt: string, maxTokens: numbe
   }
 }
 
-export async function callDeepSeek(prompt: string, maxTokens: number): Promise<string> {
+export async function callDeepSeek(systemPrompt: string, userPrompt: string, maxTokens: number): Promise<string> {
   const apiKey = process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) throw makeHttpError(503);
+  if (!apiKey) { console.warn("[DeepSeek] No API key — DEEPSEEK_API_KEY not set"); throw makeHttpError(503); }
 
-  const res = await fetch("https://api.deepseek.com/v1/chat/completions", {
+  const res = await fetch("https://api.deepseek.com/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -95,20 +95,28 @@ export async function callDeepSeek(prompt: string, maxTokens: number): Promise<s
     },
     body: JSON.stringify({
       model: "deepseek-chat",
-      messages: [{ role: "user", content: prompt }],
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
       max_tokens: maxTokens,
       temperature: 0.3,
+      stream: false,
     }),
-    signal: AbortSignal.timeout(30000),
+    signal: AbortSignal.timeout(45000),
   });
-  if (!res.ok) throw makeHttpError(res.status);
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    console.error(`[DeepSeek] ${res.status}: ${errText.slice(0, 200)}`);
+    throw makeHttpError(res.status);
+  }
   const data = await res.json();
   return data.choices?.[0]?.message?.content ?? "";
 }
 
 export async function callGemini(prompt: string, maxTokens: number): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw makeHttpError(503);
+  if (!apiKey) { console.warn("[Gemini] No API key — GEMINI_API_KEY not set"); throw makeHttpError(503); }
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
@@ -116,13 +124,23 @@ export async function callGemini(prompt: string, maxTokens: number): Promise<str
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: { maxOutputTokens: maxTokens, temperature: 0.3 },
+        safetySettings: [
+          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+        ],
       }),
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(45000),
     }
   );
-  if (!res.ok) throw makeHttpError(res.status);
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    console.error(`[Gemini] ${res.status}: ${errText.slice(0, 200)}`);
+    throw makeHttpError(res.status);
+  }
   const data = await res.json();
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
   if (!text) throw new Error("Empty Gemini response");
@@ -231,13 +249,13 @@ export function buildStrategicChain(): ModelStep[] {
   return [
     { name: "Groq Llama 70b", call: (p, t) => callGroq("llama-3.3-70b-versatile", p, t), maxTokens: 4000, promptType: "full" },
     { name: "Groq Mixtral 8x7b", call: (p, t) => callGroq("mixtral-8x7b-32768", p, t), maxTokens: 2000, promptType: "compact" },
-    { name: "DeepSeek", call: (p, t) => callDeepSeek(p, t), maxTokens: 2000, promptType: "compact" },
+    { name: "DeepSeek", call: (p, t) => callDeepSeek("You are a senior M&A banker at Goldman Sachs with deep expertise in strategic deal analysis.", p, t), maxTokens: 2000, promptType: "compact" },
   ];
 }
 
 export function buildFinancialChain(): ModelStep[] {
   return [
-    { name: "DeepSeek", call: (p, t) => callDeepSeek(p, t), maxTokens: 2000, promptType: "full" },
+    { name: "DeepSeek", call: (p, t) => callDeepSeek("You are a senior M&A financial analyst specialising in company valuation and EV multiples.", p, t), maxTokens: 2000, promptType: "full" },
     { name: "Groq Llama 70b", call: (p, t) => callGroq("llama-3.3-70b-versatile", p, t), maxTokens: 2000, promptType: "compact" },
     { name: "Gemini Flash", call: (p, t) => callGemini(p, t), maxTokens: 2000, promptType: "compact" },
   ];
